@@ -196,10 +196,10 @@ describe('applicant validation', () => {
 describe('settings files', () => {
   const dir = mkdtempSync(join(tmpdir(), 'jobbot-settings-'));
 
-  it('accepts dailyTime as a 24-hour HH:MM and nothing else; missing is fine', () => {
-    for (const t of ['00:00', '09:00', '18:30', '23:59'])
+  it('accepts dailyTime as one or more comma-separated 24-hour HH:MM and nothing else; missing is fine', () => {
+    for (const t of ['00:00', '09:00', '18:30', '23:59', '09:00, 15:00, 21:00', '09:00,21:00'])
       assert.equal(validateText('config', JSON.stringify({ ...realConfig(), dailyTime: t })).ok, true, t);
-    for (const t of ['9:00', '24:00', '12:60', '9am', '18.30', '']) {
+    for (const t of ['9:00', '24:00', '12:60', '9am', '18.30', '', '09:00,', '09:00; 15:00', '09:00, 25:00']) {
       const r = validateText('config', JSON.stringify({ ...realConfig(), dailyTime: t }));
       assert.equal(r.ok, false, t);
       assert.equal(errorsOf(r)[0].path, 'dailyTime');

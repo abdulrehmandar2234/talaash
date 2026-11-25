@@ -83,7 +83,7 @@ Then restart, so the dashboard reads it: `docker compose restart`. [AI](../ai.md
 
 ## The daily run
 
-The `scheduler` service runs `bot daily --if-due` every 30 minutes; the run itself happens once a day at `dailyTime` (Settings page, **Daily run time**), in your `TZ`. It fetches, checks which postings closed, lets the AI review new matches and backs up the database. Its log is `talaash-home/data/fetch.log`. Until your CV exists (`talaash-home/cv/master.json`) it waits, so the first run comes after setup, the same day. Run it at once with `docker compose exec app bot daily`.
+The `scheduler` service runs `bot daily --if-due` every 30 minutes; the run itself happens at each time in `dailyTime` (one or several, comma-separated; Settings page, **Run times**), in your `TZ`. It fetches, checks which postings closed, lets the AI review new matches and backs up the database. Its log is `talaash-home/data/fetch.log`. Until your CV exists (`talaash-home/cv/master.json`) it waits, so the first run comes after setup, the same day. Run it at once with `docker compose exec app bot daily`.
 
 ## The Chrome extension
 

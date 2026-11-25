@@ -138,7 +138,7 @@ export const NEXT_STEPS_DOCKER = [
   'Next: put your CV in talaash-home/cv/master.json (see cv/master.example.json), then `docker compose exec app bot cv:default` and `docker compose exec app bot fetch`.',
   'Check the whole setup at any time: `docker compose exec app bot doctor`.',
   'AI with an API key: put AI_API_KEY=... in talaash-home/.env, then `docker compose restart` (docs/install/docker.md#ai).',
-  'The daily run is the scheduler service: once a day at dailyTime, in your TZ (docs/install/docker.md).',
+  'The daily run is the scheduler service: at each dailyTime time, in your TZ (docs/install/docker.md).',
 ];
 
 /** The connection string the install guides use (docs/install, step 4). */

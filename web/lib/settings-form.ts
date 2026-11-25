@@ -37,7 +37,7 @@ export const CONFIG_FIELDS: Record<string, FieldType> = {
   maxAgeDays: 'number',
   skipJobTypes: 'lines', // empty = keep every job type
   blockedCompanies: 'lines', // empty = hide no company
-  dailyTime: 'optional', // "HH:MM"; empty = 09:00, the built-in default (the key is left out)
+  dailyTime: 'optional', // "HH:MM", or several comma-separated; empty = 09:00, the built-in default (the key is left out)
   autoCvVersions: 'bool',
   cvTemplate: 'optional', // empty = classic, the built-in default (the key is left out)
   roleInclude: 'text',

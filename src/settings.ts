@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { API_PRESETS, RESPONSE_FORMATS } from './ai-presets.ts';
 import { TEMPLATE_IDS } from './cv/templates/index.ts';
 import { UserError } from './errors.ts';
-import { ATS, JOB_TYPES, REMOTE_BOARDS } from './types.ts';
+import { ATS, JOB_TYPES, REMOTE_BOARDS, RUN_TIME } from './types.ts';
 
 // Schemas for the two hand-edited settings files, config.json and cv/applicant.json. Loading them (config.ts, ai.ts)
 // validates first, so a typo fails at startup with the file and field instead of deep inside a fetch.
@@ -99,10 +99,11 @@ export const configSchema = z.object({
   chromePath: text.optional(), // "auto" or missing: Playwright's headless shell, else a system Chrome (src/cv/chrome.ts)
   minScore: z.number(),
   maxAgeDays: count, // postings older than this are filtered out
-  // When the scheduled daily run starts, local time, 24-hour "HH:MM" (src/commands/daily.ts). Missing = 09:00.
+  // When the scheduled run starts, local time: one 24-hour "HH:MM" or several, comma-separated ("09:00, 15:00, 21:00";
+  // src/commands/daily.ts). Missing = 09:00.
   dailyTime: z
     .string()
-    .regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'a 24-hour time like "09:00" or "18:30"')
+    .refine((t) => t.split(',').every((p) => RUN_TIME.test(p.trim())), 'one or more 24-hour times like "09:00" or "09:00, 15:00, 21:00"')
     .optional(),
   // Job types to filter out when a source states them (src/match.ts jobTypeOf). Missing = DEFAULT_SKIP_JOB_TYPES.
   skipJobTypes: z.array(z.enum(JOB_TYPES)).optional(),

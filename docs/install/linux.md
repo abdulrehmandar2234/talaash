@@ -239,7 +239,7 @@ Open <http://localhost:3100>. Leave the terminal with `npm run web` open: the da
 
 ## 12. Schedule the daily run
 
-`npm run bot -- daily` is the daily run: fetch, check which postings have closed, AI review, a notification, a database backup and a cleanup of leftover files, logged to `data/fetch.log`. It runs once a day at `dailyTime` in `config.json` (default `09:00`; the Settings page has it as **Daily run time**). On Linux a **systemd user timer** starts `bot daily --if-due` every 30 minutes; the run only starts when it is due, so changing the time later needs nothing else, and a run missed while the computer was off happens at the first check after it. Print the setup for this clone, with your paths and your Node filled in:
+`npm run bot -- daily` is the daily run: fetch, check which postings have closed, AI review, a notification, a database backup and a cleanup of leftover files, logged to `data/fetch.log`. It runs at each time in `dailyTime` in `config.json` (one time or several, comma-separated, e.g. `09:00, 15:00, 21:00`; default `09:00`; the Settings page has it as **Run times**). On Linux a **systemd user timer** starts `bot daily --if-due` every 30 minutes; the run only starts when it is due, so changing the time later needs nothing else, and a run missed while the computer was off happens at the first check after it. Print the setup for this clone, with your paths and your Node filled in:
 
 ```bash
 npm run bot -- schedule:print

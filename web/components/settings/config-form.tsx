@@ -32,8 +32,19 @@ export function ConfigForm({ config, keys, bot = 'npm run bot --' }: { config: S
             <Field label="Max posting age (days)" {...f('maxAgeDays')}>
               <input type="number" min={0} name="maxAgeDays" defaultValue={text(c.maxAgeDays)} className={input} />
             </Field>
-            <Field label="Daily run time" hint="local time; the daily fetch starts then (default 09:00)" {...f('dailyTime')}>
-              <input type="time" name="dailyTime" defaultValue={text(c.dailyTime) || DEFAULT_DAILY_TIME} className={input} />
+            <Field
+              label="Run times"
+              hint="local 24-hour times, comma-separated; the fetch runs at each (default 09:00), e.g. 09:00, 15:00, 21:00"
+              {...f('dailyTime')}
+            >
+              <input
+                type="text"
+                name="dailyTime"
+                inputMode="numeric"
+                placeholder="09:00, 15:00, 21:00"
+                defaultValue={text(c.dailyTime) || DEFAULT_DAILY_TIME}
+                className={input}
+              />
             </Field>
           </div>
           <Field label="Role include" hint="regular expression" {...f('roleInclude')}>

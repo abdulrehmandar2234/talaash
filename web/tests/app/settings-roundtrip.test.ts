@@ -102,6 +102,8 @@ describe('settings round-trip through the CLI', () => {
     const after = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
     expect(after.dailyTime).toBe('18:30');
 
+    expect(await saveConfig(null, configForm(after, { dailyTime: '09:00, 15:00, 21:00' }))).toMatchObject({ ok: true });
+    expect(JSON.parse(readFileSync(CONFIG_FILE, 'utf8')).dailyTime).toBe('09:00, 15:00, 21:00');
     expect(await saveConfig(null, configForm(after, { dailyTime: '' }))).toMatchObject({ ok: true });
     expect('dailyTime' in JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))).toBe(false);
 

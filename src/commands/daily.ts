@@ -6,7 +6,7 @@ import { DASHBOARD_URL, notify, type Note } from '../notify.ts';
 import { dataPath, masterFile, path, ROOT } from '../settings.ts';
 import { CACHE_MAX_AGE_DAYS, pruneCache } from '../sources/http.ts';
 import { indRegisterStale } from '../sponsors.ts';
-import { DEFAULT_DAILY_TIME } from '../types.ts';
+import { DEFAULT_DAILY_TIME, RUN_TIME } from '../types.ts';
 
 // daily: the scheduled morning run, the same on macOS, Linux and Windows (launchd runs it through
 // scripts/daily-fetch.sh; cron, a systemd timer or Task Scheduler run it directly, see `bot schedule:print`).
@@ -253,7 +253,10 @@ export function usesIndRegister(): boolean {
 }
 
 export { DEFAULT_DAILY_TIME };
-/** The file that holds the local date ("2026-11-11") of the last scheduled run (`daily --if-due`). */
+/**
+ * The file that holds the last scheduled run (`daily --if-due`): the local date and the run time it was for
+ * ("2026-11-11 15:00"). Older versions wrote only the date ("2026-11-11"), which counts as that day's first run.
+ */
 export const LAST_RUN_FILE = 'daily-last-run';
 
 /** A local calendar date as "YYYY-MM-DD". */
@@ -261,40 +264,63 @@ export const localDate = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 /**
- * Whether the scheduled run should start now: it is `time` ("HH:MM", local) or later today, and the last scheduled
- * run was not today. The scheduler starts `daily --if-due` every 30 minutes, so a new `dailyTime` (config.json or the
- * Settings page) takes effect the next day it is due, and a run missed while the computer slept happens when it wakes.
+ * The run that is due now, as "YYYY-MM-DD HH:MM", or null: the latest of `times` ("HH:MM", local) that has passed
+ * today, unless the last scheduled run was already for it. The scheduler starts `daily --if-due` every 30 minutes, so
+ * a new `dailyTime` (config.json or the Settings page) takes effect at its next time, and runs missed while the
+ * computer slept make one run when it wakes.
  */
-export function dailyDue(time: string, now: Date, lastRun: string | null): boolean {
-  const [h, m] = time.split(':').map(Number);
-  if (lastRun === localDate(now)) return false;
-  return now.getHours() > h || (now.getHours() === h && now.getMinutes() >= m);
+export function dueRun(times: string[], now: Date, lastRun: string | null): string | null {
+  const minute = now.getHours() * 60 + now.getMinutes();
+  const passed = times.filter((t) => {
+    const [h, m] = t.split(':').map(Number);
+    return h * 60 + m <= minute;
+  });
+  if (!passed.length) return null;
+  const today = localDate(now);
+  const slot = `${today} ${passed.at(-1)}`;
+  // An older marker holds only the date: that day's first run.
+  const last = lastRun === today ? `${today} ${times[0]}` : lastRun;
+  return last && last >= slot ? null : slot;
 }
 
+/** Whether the scheduled run should start now (dueRun). */
+export const dailyDue = (times: string[], now: Date, lastRun: string | null) => dueRun(times, now, lastRun) !== null;
+
 /**
- * Whether the scheduled run starts now (dailyDue, with the last run's date read from `marker`). When it does, today's
- * date is written to `marker` first, so a run longer than the check interval is not started a second time.
+ * Whether the scheduled run starts now (dueRun, with the last run read from `marker`). When it does, the run it is
+ * for is written to `marker` first, so a run longer than the check interval is not started a second time.
  */
-export function claimDailyRun(marker: string, time: string, now: Date): boolean {
+export function claimDailyRun(marker: string, times: string[], now: Date): boolean {
   const last = existsSync(marker) ? readFileSync(marker, 'utf8').trim() : null;
-  if (!dailyDue(time, now, last)) return false;
-  writeFileSync(marker, `${localDate(now)}\n`);
+  const run = dueRun(times, now, last);
+  if (!run) return false;
+  writeFileSync(marker, `${run}\n`);
   return true;
 }
 
-/** config.json's `dailyTime`, or 09:00 when it is missing, invalid or config.json cannot be read. */
-export function configuredDailyTime(read: () => string | undefined = () => loadConfig().dailyTime): string {
+/** "09:00, 15:00, 21:00" as sorted, distinct times; null when any part is not a 24-hour "HH:MM". */
+export function parseRunTimes(text: string): string[] | null {
+  const parts = text.split(',').map((t) => t.trim());
+  if (!parts.every((t) => RUN_TIME.test(t))) return null;
+  return [...new Set(parts)].sort();
+}
+
+/**
+ * config.json's `dailyTime` (one time or several, comma-separated) as sorted times, or [09:00] when it is missing,
+ * invalid or config.json cannot be read.
+ */
+export function configuredDailyTimes(read: () => string | undefined = () => loadConfig().dailyTime): string[] {
   try {
     const t = read();
-    return t && /^([01]\d|2[0-3]):[0-5]\d$/.test(t) ? t : DEFAULT_DAILY_TIME;
+    return (t && parseRunTimes(t)) || [DEFAULT_DAILY_TIME];
   } catch {
-    return DEFAULT_DAILY_TIME; // a broken config.json: the run's fetch reports it
+    return [DEFAULT_DAILY_TIME]; // a broken config.json: the run's fetch reports it
   }
 }
 
 /**
  * daily: the scheduled run. Works from any folder (Task Scheduler's schtasks cannot set one). With --if-due (how the
- * scheduler starts it, every 30 minutes) it runs only once a day, at `dailyTime` or the first check after it, and
+ * scheduler starts it, every 30 minutes) it runs once at each of the `dailyTime` times, or the first check after one, and
  * exits quietly otherwise; without it, it always runs. A scheduled check before setup is done (no master CV yet, as
  * right after `docker compose up`) waits without claiming the day, so the first run after setup is today's.
  */
@@ -306,7 +332,7 @@ export async function daily(
 ) {
   mkdirSync(dataPath(), { recursive: true });
   if (flags['if-due'] && !cvExists()) return;
-  if (flags['if-due'] && !claimDailyRun(dataPath(LAST_RUN_FILE), configuredDailyTime(), now)) return;
+  if (flags['if-due'] && !claimDailyRun(dataPath(LAST_RUN_FILE), configuredDailyTimes(), now)) return;
   // The children load .env themselves; this process needs it for JOB_BOT_NOTIFY. Variables already set win.
   if (existsSync(path('.env'))) process.loadEnvFile(path('.env'));
   const logFile = dataPath('fetch.log');
