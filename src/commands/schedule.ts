@@ -2,16 +2,16 @@ import { userInfo } from 'node:os';
 import { posix, win32 } from 'node:path';
 import { psQuote } from '../notify.ts';
 import { ROOT } from '../settings.ts';
-import { configuredDailyTime } from './daily.ts';
+import { configuredDailyTimes } from './daily.ts';
 
 // schedule:print: the snippet that starts `bot daily --if-due` every 30 minutes with this OS's scheduler, filled in
-// with the paths of this clone and this Node; the run itself happens once a day at config.json's dailyTime (default
-// 09:00, src/commands/daily.ts), so changing the time needs no new snippet. It only prints; you install it yourself
+// with the paths of this clone and this Node; the run itself happens at each of config.json's dailyTime times (one or
+// more, default 09:00, src/commands/daily.ts), so changing the times needs no new snippet. It only prints; you install it yourself
 // (docs/install/<your OS>.md, "Schedule the daily run").
 
 export type ScheduleTarget = {
-  /** The daily run's time ("HH:MM"), only shown in the comments: `daily --if-due` reads it itself. */
-  time?: string;
+  /** The run times ("HH:MM"). Only shown in the comments, except on Windows: `daily --if-due` reads them itself. */
+  times?: string[];
   platform: NodeJS.Platform;
   root: string;
   node: string;
@@ -33,23 +33,25 @@ const WIN_ARGS = '--no-warnings --env-file-if-exists=.env src/cli.ts daily';
 export const CHECK_EVERY_MIN = 30;
 
 export function scheduleSnippet(t: ScheduleTarget): string {
-  const time = t.time ?? '09:00';
-  // Windows opens a console window whenever Task Scheduler starts node.exe, so there the task starts once a day at
-  // the time itself instead of checking every 30 minutes; a new time means printing and registering it again.
+  const times = t.times?.length ? t.times : ['09:00'];
+  const time = times.join(', ');
+  const when = times.length > 1 ? `${times.length} times a day, at ${time}` : `once a day at ${time}`;
+  // Windows opens a console window whenever Task Scheduler starts node.exe, so there the task starts at each time
+  // itself instead of checking every 30 minutes; new times mean printing and registering it again.
   const header =
     t.platform === 'win32'
-      ? `# Talaash's daily run: Task Scheduler starts \`bot daily\` once a day at ${time} (config.json "dailyTime", or
-# the Settings page), or as soon as the computer is on again after a missed run. After changing the time, run
+      ? `# Talaash's daily run: Task Scheduler starts \`bot daily\` ${when} (config.json "dailyTime", or
+# the Settings page), or as soon as the computer is on again after a missed run. After changing the times, run
 # \`npm run bot -- schedule:print\` again and paste the PowerShell lines again (they replace the task).
 `
-      : `# Talaash's daily run: the scheduler starts \`bot daily --if-due\` every ${CHECK_EVERY_MIN} minutes, and the run happens once
-# a day at ${time} (config.json "dailyTime", or the Settings page), or at the first check after it if the computer was
-# asleep or off. Changing the time later needs no change here.
+      : `# Talaash's daily run: the scheduler starts \`bot daily --if-due\` every ${CHECK_EVERY_MIN} minutes, and the run happens
+# ${when} (config.json "dailyTime", or the Settings page), or at the first check after one if the computer was
+# asleep or off. Changing the times later needs no change here.
 `;
-  return header + osSnippet(t, time);
+  return header + osSnippet(t, times);
 }
 
-function osSnippet(t: ScheduleTarget, time: string): string {
+function osSnippet(t: ScheduleTarget, times: string[]): string {
   if (t.platform === 'darwin') {
     const label = `com.${t.user.replace(/[^A-Za-z0-9-]/g, '') || 'me'}.job-bot.fetch`;
     const plist = `~/Library/LaunchAgents/${label}.plist`;
@@ -76,13 +78,18 @@ launchctl bootstrap gui/$(id -u) ${plist}
     const cli = win32.join(t.root, 'src', 'cli.ts');
     return `# Windows (Task Scheduler), in PowerShell (-Force replaces an older task):
 $action = New-ScheduledTaskAction -Execute ${psQuote(t.node)} -Argument ${psQuote(WIN_ARGS)} -WorkingDirectory ${psQuote(t.root)}
-$trigger = New-ScheduledTaskTrigger -Daily -At ${psQuote(time)}
+$trigger = ${times.length > 1 ? `@(${times.map((x) => `(New-ScheduledTaskTrigger -Daily -At ${psQuote(x)})`).join(', ')})` : `New-ScheduledTaskTrigger -Daily -At ${psQuote(times[0])}`}
 $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2)
 Register-ScheduledTask -TaskName 'job-bot daily fetch' -Action $action -Trigger $trigger -Settings $settings -Force
 # To try the whole run once now, whatever the time: npm run bot -- daily
 
-# Or in cmd.exe with schtasks (no catch-up after a missed run):
-schtasks /Create /F /SC DAILY /ST ${time} /TN "job-bot daily fetch" /TR "\\"${t.node}\\" --no-warnings \\"${cli}\\" daily"
+# Or in cmd.exe with schtasks (no catch-up after a missed run; one task per time):
+${times
+  .map(
+    (x, i) =>
+      `schtasks /Create /F /SC DAILY /ST ${x} /TN "job-bot daily fetch${i ? ` ${i + 1}` : ''}" /TR "\\"${t.node}\\" --no-warnings \\"${cli}\\" daily"`,
+  )
+  .join('\n')}
 `;
   }
   const bus = t.uid === undefined ? '' : `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${t.uid}/bus\n`;
@@ -115,7 +122,7 @@ ${bus}*/${CHECK_EVERY_MIN} * * * * cd ${shQuote(t.root)} && ${shQuote(t.node)} $
 `;
 }
 
-/** schedule:print [--os macos|linux|windows]: the snippet for this OS, with config.json's dailyTime in its comments. */
+/** schedule:print [--os macos|linux|windows]: the snippet for this OS, with config.json's run times in its comments. */
 export function schedulePrint(_args: string[], flags: Record<string, string>) {
   const os = flags.os;
   const platform: NodeJS.Platform | undefined =
@@ -129,6 +136,6 @@ export function schedulePrint(_args: string[], flags: Record<string, string>) {
   try {
     user = userInfo().username;
   } catch {}
-  const time = configuredDailyTime();
-  process.stdout.write(scheduleSnippet({ platform, root: ROOT, node: process.execPath, user, uid: process.getuid?.(), time }));
+  const times = configuredDailyTimes();
+  process.stdout.write(scheduleSnippet({ platform, root: ROOT, node: process.execPath, user, uid: process.getuid?.(), times }));
 }

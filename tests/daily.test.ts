@@ -9,10 +9,12 @@ import {
   childEnv,
   claimDailyRun,
   cliRunner,
-  configuredDailyTime,
+  configuredDailyTimes,
   type DailyDeps,
   DEFAULT_DAILY_TIME,
   dailyDue,
+  dueRun,
+  parseRunTimes,
   FETCH_FAILED,
   localDate,
   rotateLogs,
@@ -375,46 +377,69 @@ describe('daily --if-due', () => {
   const at = (h: number, m: number, day = 11) => new Date(2026, 10, day, h, m);
 
   it('is due at dailyTime or later, once a local day', () => {
-    assert.equal(dailyDue('09:00', at(8, 59), null), false);
-    assert.equal(dailyDue('09:00', at(9, 0), null), true);
-    assert.equal(dailyDue('09:00', at(23, 30), '2026-11-10'), true, 'missed while asleep: runs when it wakes');
-    assert.equal(dailyDue('09:00', at(9, 30), '2026-11-11'), false, 'already ran today');
-    assert.equal(dailyDue('18:30', at(18, 29), null), false);
-    assert.equal(dailyDue('18:30', at(18, 30), null), true);
-    assert.equal(dailyDue('18:30', at(19, 0), null), true);
-    assert.equal(dailyDue('00:00', at(0, 0, 12), '2026-11-11'), true);
+    assert.equal(dailyDue(['09:00'], at(8, 59), null), false);
+    assert.equal(dailyDue(['09:00'], at(9, 0), null), true);
+    assert.equal(dailyDue(['09:00'], at(23, 30), '2026-11-10 09:00'), true, 'missed while asleep: runs when it wakes');
+    assert.equal(dailyDue(['09:00'], at(9, 30), '2026-11-11 09:00'), false, 'already ran today');
+    assert.equal(dailyDue(['09:00'], at(9, 30), '2026-11-11'), false, 'a marker from before several times: ran today');
+    assert.equal(dailyDue(['18:30'], at(18, 29), null), false);
+    assert.equal(dailyDue(['18:30'], at(18, 30), null), true);
+    assert.equal(dailyDue(['18:30'], at(19, 0), null), true);
+    assert.equal(dailyDue(['00:00'], at(0, 0, 12), '2026-11-11 00:00'), true);
+  });
+
+  it('with several times runs once at each, and once for all the times missed while asleep', () => {
+    const times = ['09:00', '15:00', '21:00'];
+    assert.equal(dueRun(times, at(8, 59), '2026-11-10 21:00'), null);
+    assert.equal(dueRun(times, at(9, 0), '2026-11-10 21:00'), '2026-11-11 09:00');
+    assert.equal(dueRun(times, at(12, 0), '2026-11-11 09:00'), null);
+    assert.equal(dueRun(times, at(15, 30), '2026-11-11 09:00'), '2026-11-11 15:00');
+    assert.equal(dueRun(times, at(22, 0), '2026-11-11 09:00'), '2026-11-11 21:00', 'asleep at 15:00: one run, for 21:00');
+    assert.equal(dueRun(times, at(23, 0), '2026-11-11 21:00'), null);
+    assert.equal(dueRun(times, at(16, 0), '2026-11-11'), '2026-11-11 15:00', 'an old date-only marker counts as 09:00');
+  });
+
+  it('reads one or more comma-separated times, sorted and without repeats', () => {
+    assert.deepEqual(parseRunTimes('21:00, 09:00,15:00, 09:00'), ['09:00', '15:00', '21:00']);
+    assert.deepEqual(parseRunTimes('18:30'), ['18:30']);
+    for (const bad of ['', '9:00', '09:00,', '09:00; 15:00', '24:00']) assert.equal(parseRunTimes(bad), null, bad);
   });
 
   it('claims the day in the marker file before the run, so a later check does not start it again', () => {
     const marker = join(root, 'daily-last-run');
     rmSync(marker, { force: true });
-    assert.equal(claimDailyRun(marker, '07:30', at(7, 0)), false);
+    assert.equal(claimDailyRun(marker, ['07:30', '19:00'], at(7, 0)), false);
     assert.equal(existsSync(marker), false, 'nothing written before the time');
-    assert.equal(claimDailyRun(marker, '07:30', at(7, 30)), true);
-    assert.equal(readFileSync(marker, 'utf8'), '2026-11-11\n');
-    assert.equal(claimDailyRun(marker, '07:30', at(8, 0)), false);
-    assert.equal(claimDailyRun(marker, '07:30', at(7, 45, 12)), true, 'the next day');
+    assert.equal(claimDailyRun(marker, ['07:30', '19:00'], at(7, 30)), true);
+    assert.equal(readFileSync(marker, 'utf8'), '2026-11-11 07:30\n');
+    assert.equal(claimDailyRun(marker, ['07:30', '19:00'], at(8, 0)), false);
+    assert.equal(claimDailyRun(marker, ['07:30', '19:00'], at(19, 0)), true, 'the second time');
+    assert.equal(claimDailyRun(marker, ['07:30', '19:00'], at(7, 45, 12)), true, 'the next day');
     assert.equal(localDate(at(0, 5, 1)), '2026-11-01');
   });
 
   it('reads dailyTime from config.json, 09:00 when it is missing, invalid or config.json cannot be read', () => {
-    assert.equal(
-      configuredDailyTime(() => '18:30'),
-      '18:30',
+    assert.deepEqual(
+      configuredDailyTimes(() => '18:30'),
+      ['18:30'],
     );
-    assert.equal(
-      configuredDailyTime(() => undefined),
-      DEFAULT_DAILY_TIME,
+    assert.deepEqual(
+      configuredDailyTimes(() => '21:00, 09:00, 15:00'),
+      ['09:00', '15:00', '21:00'],
     );
-    assert.equal(
-      configuredDailyTime(() => '25:00'),
-      '09:00',
+    assert.deepEqual(
+      configuredDailyTimes(() => undefined),
+      [DEFAULT_DAILY_TIME],
     );
-    assert.equal(
-      configuredDailyTime(() => {
+    assert.deepEqual(
+      configuredDailyTimes(() => '25:00'),
+      ['09:00'],
+    );
+    assert.deepEqual(
+      configuredDailyTimes(() => {
         throw new Error('Invalid settings file');
       }),
-      '09:00',
+      ['09:00'],
     );
   });
 
@@ -450,11 +475,13 @@ describe('daily --if-due', () => {
 
 describe('scheduleSnippet', () => {
   it('says when the run happens: every 30 minutes a check, the run once a day at dailyTime', () => {
-    const s = scheduleSnippet({ platform: 'darwin', root: '/r', node: '/n', user: 'me', time: '18:30' });
+    const s = scheduleSnippet({ platform: 'darwin', root: '/r', node: '/n', user: 'me', times: ['18:30'] });
     assert.match(s, /^# Talaash's daily run: the scheduler starts `bot daily --if-due` every 30 minutes/);
-    assert.match(s, /Changing the time later needs no change here/);
-    assert.match(s, /once\n# a day at 18:30 \(config\.json "dailyTime", or the Settings page\)/);
-    assert.match(scheduleSnippet({ platform: 'linux', root: '/r', node: '/n', user: 'me' }), /a day at 09:00 /);
+    assert.match(s, /Changing the times later needs no change here/);
+    assert.match(s, /happens\n# once a day at 18:30 \(config\.json "dailyTime", or the Settings page\)/);
+    assert.match(scheduleSnippet({ platform: 'linux', root: '/r', node: '/n', user: 'me' }), /once a day at 09:00 /);
+    const three = scheduleSnippet({ platform: 'darwin', root: '/r', node: '/n', user: 'me', times: ['09:00', '15:00', '21:00'] });
+    assert.match(three, /# 3 times a day, at 09:00, 15:00, 21:00 \(config\.json "dailyTime"/);
   });
 
   it('macOS: a launchd plist that runs scripts/daily-fetch.sh --if-due with zsh every 30 minutes and at login', () => {
@@ -485,7 +512,7 @@ describe('scheduleSnippet', () => {
       root: "C:\\Users\\O'Neil\\talaash",
       node: 'C:\\Program Files\\nodejs\\node.exe',
       user: 'x',
-      time: '18:30',
+      times: ['18:30'],
     });
     assert.match(s, /^# Talaash's daily run: Task Scheduler starts `bot daily` once a day at 18:30/);
     assert.match(s, /run\n# `npm run bot -- schedule:print` again/);
@@ -503,6 +530,20 @@ describe('scheduleSnippet', () => {
       ),
       s,
     );
+  });
+});
+
+describe('scheduleSnippet with several times', () => {
+  it('Windows: one trigger per time in PowerShell, and one schtasks task per time', () => {
+    const s = scheduleSnippet({ platform: 'win32', root: 'C:\\t', node: 'C:\\node.exe', user: 'x', times: ['09:00', '15:00', '21:00'] });
+    assert.match(s, /starts `bot daily` 3 times a day, at 09:00, 15:00, 21:00/);
+    assert.match(
+      s,
+      /\$trigger = @\(\(New-ScheduledTaskTrigger -Daily -At '09:00'\), \(New-ScheduledTaskTrigger -Daily -At '15:00'\), \(New-ScheduledTaskTrigger -Daily -At '21:00'\)\)/,
+    );
+    assert.match(s, /schtasks \/Create \/F \/SC DAILY \/ST 09:00 \/TN "job-bot daily fetch" /);
+    assert.match(s, /schtasks \/Create \/F \/SC DAILY \/ST 15:00 \/TN "job-bot daily fetch 2" /);
+    assert.match(s, /schtasks \/Create \/F \/SC DAILY \/ST 21:00 \/TN "job-bot daily fetch 3" /);
   });
 });
 

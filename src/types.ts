@@ -22,6 +22,8 @@ export const KEEP_FINISHED_DAYS = 30;
 
 /** When the scheduled daily run starts if config.json has no `dailyTime` (src/commands/daily.ts). */
 export const DEFAULT_DAILY_TIME = '09:00';
+/** One scheduled run time: 24-hour "HH:MM". config.json's `dailyTime` holds one or more, comma-separated. */
+export const RUN_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export type JobStatus = 'new' | 'prepared' | 'applied' | 'interview' | 'offer' | 'rejected' | 'skipped' | 'expired' | 'filtered';
 
